@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student Attendance</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .toolbar input { padding: 8px; }
+  .card { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 5px;
+          display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .meta { color: #555; font-size: 0.9em; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.85em; color: #fff; }
+  .Present { background: #2e7d32; }
+  .Absent { background: #c62828; }
+  .None { background: #888; }
+  .actions button { padding: 8px 14px; margin-left: 5px; cursor: pointer; }
+  #message { margin-bottom: 10px; color: #c62828; }
+</style>
+</head>
+<body>
+
+<h2>Student Attendance</h2>
+
+<div class="toolbar">
+  <label for="date">Date:</label>
+  <input type="date" id="date">
+</div>
+<div id="message"></div>
+
+<div id="studentsContainer">Loading...</div>
+
+<script>
+// IMPORTANT: Replace this URL with your specific Vercel deployment URL
+const VERCEL_API_URL = 'https://student-api-backend-theta.vercel.app/api';
+
+const dateInput = document.getElementById('date');
+const container = document.getElementById('studentsContainer');
+const message = document.getElementById('message');
+
+// Default the date picker to today (local date, YYYY-MM-DD)
+const now = new Date();
+dateInput.value = now.getFullYear() + '-' +
+  String(now.getMonth() + 1).padStart(2, '0') + '-' +
+  String(now.getDate()).padStart(2, '0');
+
+let students = [];
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text == null ? '' : String(text);
+  return div.innerHTML;
+}
+
+// Find the status recorded for the selected date (the API stores dates at UTC midnight)
+function statusFor(student, day) {
+  const entry = (student.dates || []).find(d => d.date.slice(0, 10) === day);
+  return entry ? entry.status : 'None';
+}
+
+function render() {
+  const day = dateInput.value;
+  container.innerHTML = '';
+
+  if (students.length === 0) {
+    container.innerHTML = '<p>No students found.</p>';
+    return;
+  }
+
+  students.forEach(student => {
+    const status = statusFor(student, day);
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <div>
+        <strong>${escapeHtml(student.studentName)}</strong><br>
+        <span class="meta">${escapeHtml(student.subjectName)} &middot; ${escapeHtml(student.section)}</span><br>
+        <span class="badge ${status}">${status === 'None' ? 'Not marked' : status}</span>
+      </div>
+      <div class="actions">
+        <button data-id="${student._id}" data-status="Present">Present</button>
+        <button data-id="${student._id}" data-status="Absent">Absent</button>
+      </div>`;
+    container.appendChild(div);
+  });
+}
+
+async function loadStudents() {
+  try {
+    const response = await fetch(VERCEL_API_URL);
+    if (!response.ok) throw new Error('Request failed');
+    students = await response.json();
+    message.textContent = '';
+    render();
+  } catch (error) {
+    container.innerText = 'Error loading students.';
+  }
+}
+
+async function mark(id, status) {
+  try {
+    const response = await fetch(VERCEL_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status, date: dateInput.value })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      message.textContent = data.error || 'Failed to save attendance.';
+      return;
+    }
+    message.textContent = '';
+    // Replace the updated student in the local list and redraw
+    students = students.map(s => (s._id === data._id ? data : s));
+    render();
+  } catch (error) {
+    message.textContent = 'Failed to save attendance.';
+  }
+}
+
+// Handle Present/Absent button clicks
+container.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-id]');
+  if (btn) mark(btn.dataset.id, btn.dataset.status);
+});
+
+// Re-render when the date changes
+dateInput.addEventListener('change', render);
+
+// Initial load
+loadStudents();
+</script>
+
+</body>
+</html>
