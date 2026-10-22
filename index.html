@@ -3,58 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Student Attendance</title>
+<title>Student Database Project</title>
 <style>
-  body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
-  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
-  .toolbar input { padding: 8px; }
-  .toolbar button { padding: 8px 14px; cursor: pointer; }
-  .card { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 5px;
-          display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+  .card { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; border-radius: 5px; }
+  input, button { display: block; width: 100%; margin-bottom: 10px; padding: 8px; box-sizing: border-box; }
+  .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .row input { width: auto; margin-bottom: 0; }
+  .row button { width: auto; margin-bottom: 0; }
   .meta { color: #555; font-size: 0.9em; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.85em; color: #fff; }
   .Present { background: #2e7d32; }
   .Absent { background: #c62828; }
   .None { background: #888; }
-  .actions button { padding: 8px 14px; margin-left: 5px; cursor: pointer; }
-  #message { margin-bottom: 10px; color: #c62828; }
-  #updated { color: #555; font-size: 0.85em; }
+  .actions { display: flex; gap: 10px; margin-top: 10px; }
+  .actions button { margin-bottom: 0; cursor: pointer; }
+  #message { color: #c62828; margin-bottom: 10px; }
 </style>
 </head>
 <body>
 
-<h2>Student Attendance</h2>
+<h2>Add New Student</h2>
+<form id="dataForm">
+  <input type="text" id="studentName" placeholder="Student Name" required>
+  <input type="text" id="subjectName" placeholder="Subject Name" required>
+  <input type="text" id="section" placeholder="Section" required>
+  <button type="submit">Submit to Database</button>
+</form>
 
-<div class="toolbar">
+<h2>Database Records</h2>
+<div class="row">
   <label for="date">Date:</label>
   <input type="date" id="date">
-  <button id="refreshBtn" type="button">Refresh</button>
-  <span id="updated"></span>
+  <button type="button" id="refreshBtn">Refresh</button>
 </div>
 <div id="message"></div>
-
-<div id="studentsContainer">Loading...</div>
+<div id="recordsContainer">Loading...</div>
 
 <script>
 // IMPORTANT: Replace this URL with your specific Vercel deployment URL
 const VERCEL_API_URL = 'https://student-api-backend-theta.vercel.app/api';
 
 const dateInput = document.getElementById('date');
-const container = document.getElementById('studentsContainer');
+const container = document.getElementById('recordsContainer');
 const message = document.getElementById('message');
-const updated = document.getElementById('updated');
-const refreshBtn = document.getElementById('refreshBtn');
+let records = [];
 
-// Default the date picker to today (local date, YYYY-MM-DD)
-function todayLocal() {
-  const now = new Date();
-  return now.getFullYear() + '-' +
-    String(now.getMonth() + 1).padStart(2, '0') + '-' +
-    String(now.getDate()).padStart(2, '0');
-}
-dateInput.value = todayLocal();
-
-let students = [];
+// Default the date picker to today (local date)
+const now = new Date();
+dateInput.value = now.getFullYear() + '-' +
+  String(now.getMonth() + 1).padStart(2, '0') + '-' +
+  String(now.getDate()).padStart(2, '0');
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -62,57 +61,55 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Find the entry recorded for the selected date (the API stores dates at UTC midnight)
-function entryFor(student, day) {
-  return (student.dates || []).find(d => d.date.slice(0, 10) === day);
+function entryFor(record, day) {
+  return (record.dates || []).find(d => d.date.slice(0, 10) === day);
 }
 
+// Draw the records on the page
 function render() {
   const day = dateInput.value;
   container.innerHTML = '';
 
-  if (students.length === 0) {
-    container.innerHTML = '<p>No students found.</p>';
+  if (records.length === 0) {
+    container.innerHTML = '<p>No records found.</p>';
     return;
   }
 
-  students.forEach(student => {
-    const entry = entryFor(student, day);
+  records.forEach(record => {
+    const entry = entryFor(record, day);
     const status = entry ? entry.status : 'None';
-    // Shown in the viewer's own time zone, so it is the real local time of the click
     const marked = entry && entry.markedAt
       ? '<br><span class="meta">Marked ' + escapeHtml(new Date(entry.markedAt).toLocaleString()) + '</span>'
       : '';
     const div = document.createElement('div');
     div.className = 'card';
     div.innerHTML = `
-      <div>
-        <strong>${escapeHtml(student.studentName)}</strong><br>
-        <span class="meta">${escapeHtml(student.subjectName)} &middot; ${escapeHtml(student.section)}</span><br>
-        <span class="badge ${status}">${status === 'None' ? 'Not marked' : status}</span>${marked}
-      </div>
+      <strong>${escapeHtml(record.studentName)}</strong><br>
+      <span class="meta">${escapeHtml(record.subjectName)} &middot; ${escapeHtml(record.section)}</span><br>
+      <span class="badge ${status}">${status === 'None' ? 'Not marked' : status}</span>${marked}
       <div class="actions">
-        <button data-id="${student._id}" data-status="Present">Present</button>
-        <button data-id="${student._id}" data-status="Absent">Absent</button>
+        <button data-id="${record._id}" data-status="Present">Present</button>
+        <button data-id="${record._id}" data-status="Absent">Absent</button>
       </div>`;
     container.appendChild(div);
   });
 }
 
-async function loadStudents() {
+// Function to fetch and display records
+async function loadRecords() {
   try {
     const response = await fetch(VERCEL_API_URL, { cache: 'no-store' });
     if (!response.ok) throw new Error('Request failed');
-    students = await response.json();
+    records = await response.json();
     message.textContent = '';
-    updated.textContent = 'Updated ' + new Date().toLocaleTimeString();
     render();
   } catch (error) {
-    if (students.length === 0) container.innerText = 'Error loading students.';
+    if (records.length === 0) container.innerText = 'Error loading records.';
     else message.textContent = 'Could not refresh. Showing last loaded data.';
   }
 }
 
+// Mark a student Present or Absent for the selected date
 async function mark(id, status) {
   try {
     const response = await fetch(VERCEL_API_URL, {
@@ -126,29 +123,45 @@ async function mark(id, status) {
       return;
     }
     message.textContent = '';
-    students = students.map(s => (s._id === data._id ? data : s));
+    records = records.map(r => (r._id === data._id ? data : r));
     render();
   } catch (error) {
     message.textContent = 'Failed to save attendance.';
   }
 }
 
-// Present/Absent button clicks
+// Function to handle form submission
+document.getElementById('dataForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const studentName = document.getElementById('studentName').value;
+  const subjectName = document.getElementById('subjectName').value;
+  const section = document.getElementById('section').value;
+
+  try {
+    await fetch(VERCEL_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentName, subjectName, section })
+    });
+    // Clear form and reload records
+    document.getElementById('dataForm').reset();
+    loadRecords();
+  } catch (error) {
+    alert('Failed to submit record.');
+  }
+});
+
 container.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-id]');
   if (btn) mark(btn.dataset.id, btn.dataset.status);
 });
 
-// Re-render when the date changes
 dateInput.addEventListener('change', render);
-
-// Refresh: button, when the tab regains focus, and every 30 seconds
-refreshBtn.addEventListener('click', loadStudents);
-window.addEventListener('focus', loadStudents);
-setInterval(loadStudents, 30000);
+document.getElementById('refreshBtn').addEventListener('click', loadRecords);
+window.addEventListener('focus', loadRecords);
 
 // Initial load
-loadStudents();
+loadRecords();
 </script>
 
 </body>
