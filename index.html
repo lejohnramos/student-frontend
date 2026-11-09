@@ -18,7 +18,12 @@
   .None { background: #888; }
   .actions { display: flex; gap: 10px; margin-top: 10px; }
   .actions button { margin-bottom: 0; cursor: pointer; }
+  .edit-btn { background: #1565c0; color: #fff; border: none; border-radius: 3px; }
+  .delete-btn { background: #c62828; color: #fff; border: none; border-radius: 3px; }
+  .save-btn { background: #2e7d32; color: #fff; border: none; border-radius: 3px; }
+  .cancel-btn { background: #888; color: #fff; border: none; border-radius: 3px; }
   #message { color: #c62828; margin-bottom: 10px; }
+  #message.success { color: #2e7d32; }
 </style>
 </head>
 <body>
@@ -48,6 +53,7 @@ const dateInput = document.getElementById('date');
 const container = document.getElementById('recordsContainer');
 const message = document.getElementById('message');
 let records = [];
+let editingId = null; // id of the record currently being edited
 
 // Default the date picker to today (local date)
 const now = new Date();
@@ -59,6 +65,12 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text == null ? '' : String(text);
   return div.innerHTML;
+}
+
+// Show a message: red for errors, green for success
+function showMessage(text, isSuccess) {
+  message.textContent = text;
+  message.className = isSuccess ? 'success' : '';
 }
 
 function entryFor(record, day) {
@@ -76,13 +88,29 @@ function render() {
   }
 
   records.forEach(record => {
+    const div = document.createElement('div');
+    div.className = 'card';
+
+    // Edit mode: show input fields with Save / Cancel
+    if (record._id === editingId) {
+      div.innerHTML = `
+        <input type="text" class="edit-name" value="${escapeHtml(record.studentName)}" placeholder="Student Name">
+        <input type="text" class="edit-subject" value="${escapeHtml(record.subjectName)}" placeholder="Subject Name">
+        <input type="text" class="edit-section" value="${escapeHtml(record.section)}" placeholder="Section">
+        <div class="actions">
+          <button class="save-btn" data-action="save" data-id="${record._id}">Save</button>
+          <button class="cancel-btn" data-action="cancel">Cancel</button>
+        </div>`;
+      container.appendChild(div);
+      return;
+    }
+
+    // Normal mode
     const entry = entryFor(record, day);
     const status = entry ? entry.status : 'None';
     const marked = entry && entry.markedAt
       ? '<br><span class="meta">Marked ' + escapeHtml(new Date(entry.markedAt).toLocaleString()) + '</span>'
       : '';
-    const div = document.createElement('div');
-    div.className = 'card';
     div.innerHTML = `
       <strong>${escapeHtml(record.studentName)}</strong><br>
       <span class="meta">${escapeHtml(record.subjectName)} &middot; ${escapeHtml(record.section)}</span><br>
@@ -90,6 +118,10 @@ function render() {
       <div class="actions">
         <button data-id="${record._id}" data-status="Present">Present</button>
         <button data-id="${record._id}" data-status="Absent">Absent</button>
+      </div>
+      <div class="actions">
+        <button class="edit-btn" data-action="edit" data-id="${record._id}">Edit</button>
+        <button class="delete-btn" data-action="delete" data-id="${record._id}">Delete</button>
       </div>`;
     container.appendChild(div);
   });
@@ -101,11 +133,10 @@ async function loadRecords() {
     const response = await fetch(VERCEL_API_URL, { cache: 'no-store' });
     if (!response.ok) throw new Error('Request failed');
     records = await response.json();
-    message.textContent = '';
     render();
   } catch (error) {
     if (records.length === 0) container.innerText = 'Error loading records.';
-    else message.textContent = 'Could not refresh. Showing last loaded data.';
+    else showMessage('Could not refresh. Showing last loaded data.', false);
   }
 }
 
@@ -119,14 +150,69 @@ async function mark(id, status) {
     });
     const data = await response.json();
     if (!response.ok) {
-      message.textContent = data.error || 'Failed to save attendance.';
+      showMessage(data.error || 'Failed to save attendance.', false);
       return;
     }
-    message.textContent = '';
+    showMessage('', false);
     records = records.map(r => (r._id === data._id ? data : r));
     render();
   } catch (error) {
-    message.textContent = 'Failed to save attendance.';
+    showMessage('Failed to save attendance.', false);
+  }
+}
+
+// Save the edited student details
+async function saveEdit(id, card) {
+  const studentName = card.querySelector('.edit-name').value.trim();
+  const subjectName = card.querySelector('.edit-subject').value.trim();
+  const section = card.querySelector('.edit-section').value.trim();
+
+  if (!studentName || !subjectName || !section) {
+    showMessage('All fields are required.', false);
+    return;
+  }
+
+  try {
+    const response = await fetch(VERCEL_API_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, studentName, subjectName, section })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      showMessage(data.error || 'Failed to update record.', false);
+      return;
+    }
+    records = records.map(r => (r._id === data._id ? data : r));
+    editingId = null;
+    showMessage('Record updated successfully.', true);
+    render();
+  } catch (error) {
+    showMessage('Failed to update record.', false);
+  }
+}
+
+// Delete a student record (asks for confirmation first)
+async function deleteRecord(id) {
+  const record = records.find(r => r._id === id);
+  const name = record ? record.studentName : 'this record';
+  if (!confirm('Delete ' + name + '? This cannot be undone.')) return;
+
+  try {
+    const response = await fetch(VERCEL_API_URL + '?id=' + encodeURIComponent(id), {
+      method: 'DELETE'
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      showMessage(data.error || 'Failed to delete record.', false);
+      return;
+    }
+    records = records.filter(r => r._id !== id);
+    if (editingId === id) editingId = null;
+    showMessage('Record deleted successfully.', true);
+    render();
+  } catch (error) {
+    showMessage('Failed to delete record.', false);
   }
 }
 
@@ -138,27 +224,50 @@ document.getElementById('dataForm').addEventListener('submit', async (e) => {
   const section = document.getElementById('section').value;
 
   try {
-    await fetch(VERCEL_API_URL, {
+    const response = await fetch(VERCEL_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ studentName, subjectName, section })
     });
+    if (!response.ok) throw new Error('Request failed');
     // Clear form and reload records
     document.getElementById('dataForm').reset();
+    showMessage('Student added successfully.', true);
     loadRecords();
   } catch (error) {
     alert('Failed to submit record.');
   }
 });
 
+// One click handler for all card buttons
 container.addEventListener('click', (e) => {
-  const btn = e.target.closest('button[data-id]');
-  if (btn) mark(btn.dataset.id, btn.dataset.status);
+  const btn = e.target.closest('button');
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  if (action === 'edit') {
+    editingId = btn.dataset.id;
+    showMessage('', false);
+    render();
+  } else if (action === 'cancel') {
+    editingId = null;
+    render();
+  } else if (action === 'save') {
+    saveEdit(btn.dataset.id, btn.closest('.card'));
+  } else if (action === 'delete') {
+    deleteRecord(btn.dataset.id);
+  } else if (btn.dataset.status) {
+    mark(btn.dataset.id, btn.dataset.status);
+  }
 });
 
 dateInput.addEventListener('change', render);
-document.getElementById('refreshBtn').addEventListener('click', loadRecords);
-window.addEventListener('focus', loadRecords);
+document.getElementById('refreshBtn').addEventListener('click', () => {
+  editingId = null;
+  loadRecords();
+});
+// Don't refresh on focus while editing, or typed changes would be lost
+window.addEventListener('focus', () => { if (!editingId) loadRecords(); });
 
 // Initial load
 loadRecords();
